@@ -12,6 +12,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      // Reset activity select options
+      activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -25,15 +27,60 @@ document.addEventListener("DOMContentLoaded", () => {
           <p>${details.description}</p>
           <p><strong>Schedule:</strong> ${details.schedule}</p>
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          <div class="participants-container">
+            <strong>Participants:</strong>
+            <ul class="participant-list">
+              ${details.participants.map(p => `<li><span class="participant-email">${p}</span> <button class="delete-btn" data-email="${p}">✖</button></li>`).join('')}
+            </ul>
+          </div>
         `;
 
         activitiesList.appendChild(activityCard);
 
+        // Attach delete handlers for each participant button (optimistic UI)
+        activityCard.querySelectorAll('.delete-btn').forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            const email = btn.getAttribute('data-email');
+            if (!confirm(`Unregister ${email} from ${name}?`)) return;
+
+            const li = btn.closest('li');
+            const parentUl = li ? li.parentElement : null;
+            const nextSibling = li ? li.nextSibling : null;
+            // Backup node so we can restore on failure
+            const backup = li ? li.cloneNode(true) : null;
+
+            // Optimistically remove from DOM immediately
+            if (li) li.remove();
+
+            try {
+              const res = await fetch(`/activities/${encodeURIComponent(name)}/participants?email=${encodeURIComponent(email)}`, { method: 'DELETE' });
+              const result = await res.json();
+              if (!res.ok) {
+                // Restore backup on failure
+                if (parentUl && backup) {
+                  if (nextSibling) parentUl.insertBefore(backup, nextSibling);
+                  else parentUl.appendChild(backup);
+                }
+                console.error('Failed to unregister:', result);
+                alert(result.detail || 'Failed to unregister participant');
+              }
+            } catch (err) {
+              // Restore backup on error
+              if (parentUl && backup) {
+                if (nextSibling) parentUl.insertBefore(backup, nextSibling);
+                else parentUl.appendChild(backup);
+              }
+              console.error('Error unregistering participant:', err);
+              alert('Error unregistering participant');
+            }
+          });
+        });
+
         // Add option to select dropdown
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        activitySelect.appendChild(option);
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          activitySelect.appendChild(option);
       });
     } catch (error) {
       activitiesList.innerHTML = "<p>Failed to load activities. Please try again later.</p>";
@@ -62,6 +109,8 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        // Refresh activities so the new participant appears immediately
+        fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
